@@ -1,0 +1,128 @@
+import os
+import psycopg2
+from fastapi import FastAPI, HTTPException, Header, APIRouter
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+from auth_utils import hash_password, verify_password, create_access_token, ALGORITHM, SECRET_KEY
+from jose import jwt, JWTError
+
+load_dotenv()
+
+app = FastAPI(title="MicroClimat Auth Service")
+# Создаем роутер с префиксом, чтобы шлюз мог корректно перенаправлять запросы
+auth_router = APIRouter(prefix="/auth", tags=["Auth"])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Работа с БД ---
+def get_db_conn():
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST", "localhost"),
+            port=os.getenv("DB_PORT")
+        )
+        return conn
+    except Exception as e:
+        print(f"❌ Ошибка подключения к БД: {e}")
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+# --- Схемы данных ---
+class UserRegister(BaseModel):
+    username: str
+    password: str
+    role_name: str = "operator"
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+# --- Эндпоинты внутри роутера ---
+
+@auth_router.post("/register", status_code=201)
+def register(user: UserRegister):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        hashed_pw = hash_password(user.password) # Используем утилиту
+        cur.execute("SELECT id FROM roles WHERE name = %s", (user.role_name,))
+        role_res = cur.fetchone()
+        if not role_res:
+            raise HTTPException(status_code=400, detail="Роль не найдена")
+        
+        cur.execute(
+            "INSERT INTO users (username, password_hash, role_id) VALUES (%s, %s, %s) RETURNING id",
+            (user.username, hashed_pw, role_res[0])
+        )
+        user_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (user_id,))
+        conn.commit()
+        return {"message": "User created", "id": str(user_id)}
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="Пользователь уже существует")
+    finally:
+        cur.close()
+        conn.close()
+
+@auth_router.post("/login", response_model=Token) # Переименовали для шлюза
+def login(user: UserLogin):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT u.id, u.password_hash, r.name 
+        FROM users u 
+        JOIN roles r ON u.role_id = r.id 
+        WHERE u.username = %s
+    """, (user.username,))
+    res = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not res or not verify_password(user.password, res[1]): # Используем утилиту
+        raise HTTPException(status_code=401, detail="Неверные учетные данные")
+
+    # Используем твою функцию генерации токена
+    token = create_access_token(data={
+        "sub": str(res[0]), 
+        "username": user.username,
+        "role": res[2]
+    })
+    
+    return {"access_token": token, "token_type": "bearer"}
+
+@auth_router.get("/verify")
+def verify_token(authorization: str = Header(None)):
+    """Эндпоинт, который вызывает API Gateway для проверки прав"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Токен отсутствует")
+    
+    token = authorization.split(" ")[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return {
+            "status": "valid",
+            "user": {
+                "id": payload.get("sub"),
+                "username": payload.get("username"),
+                "role": payload.get("role")
+            }
+        }
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Токен недействителен")
+
+# Подключаем роутер к приложению
+app.include_router(auth_router)
