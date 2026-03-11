@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>DB Monitor Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .status-dot { height: 15px; width: 15px; border-radius: 50%; display: inline-block; }
+        .bg-success { background-color: #28a745; }
+        .bg-danger { background-color: #dc3545; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h2 class="mb-0">Управление базой данных IoT</h2>
+                <span class="badge bg-light text-primary">PostgreSQL</span>
+            </div>
+            <div class="card-body">
+                <h4>Статус таблиц</h4>
+                <ul class="list-group mb-4">
+                    {% for table, exists in tables.items() %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ table }}
+                        <span class="status-dot {{ 'bg-success' if exists else 'bg-danger' }}"></span>
+                    </li>
+                    {% endfor %}
+                </ul>
+
+                <div class="d-grid gap-2">
+                    <form action="/init-db" method="post">
+                        <button type="submit" class="btn btn-success btn-lg w-100">Инициализировать / Обновить таблицы</button>
+                    </form>
+                    <a href="/" class="btn btn-outline-secondary">Обновить статус</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
