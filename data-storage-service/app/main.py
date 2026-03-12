@@ -1,29 +1,30 @@
-from fastapi import FastAPI, HTTPException  # Добавили HTTPException
 import logging
-from sqlalchemy import text  # Добавили text для SQL-запросов
-from .database import engine
+from fastapi import FastAPI, Depends
+from sqlalchemy.orm import Session
+from .database import engine, get_db
 from .models import Base
 from .routes.sensors import SensorRoutes
+from .routes.buildings import BuildingRoutes
+from .routes.rooms import RoomRoutes
+from . import crud, schemas
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Data Storage Service", 
+    title="Data Storage Service",
     description="Управление взаимодействием с базой данных PostgreSQL и хранение исторических данных."
 )
 
-# Создание таблиц
 Base.metadata.create_all(bind=engine)
 
-# Подключение маршрутов
-sensor_routes = SensorRoutes()
-app.include_router(sensor_routes.router)
+app.include_router(SensorRoutes().router)
+app.include_router(BuildingRoutes().router)
+app.include_router(RoomRoutes().router)
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Сервис хранения данных запущен.")
+@app.post("/data", response_model=schemas.SensorMeasurement)
+def create_data(measurement: schemas.SensorMeasurementCreate, db: Session = Depends(get_db)):
+    return crud.create_sensor_measurement(db=db, measurement=measurement)
 
 @app.get("/")
 async def root():
@@ -35,11 +36,9 @@ async def health_check():
     Проверка работоспособности сервиса и подключения к базе данных.
     """
     try:
-        # Теперь 'text' и 'engine' определены
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+            conn.execute("SELECT 1")
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        # Теперь 'HTTPException' определен
         raise HTTPException(status_code=503, detail="Database connection failed")

@@ -1,4 +1,6 @@
 import logging
+import os
+import uuid
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -28,15 +30,15 @@ app.add_middleware(
 
 # Конфигурация портов из твоего плана
 SERVICES = {
-    "auth": "http://localhost:8001",
-    "core": "http://localhost:8002",  # Проверка: Core Service на порту 8002
-    "data": "http://localhost:8003",
-    "sensors": "http://localhost:8004",
-    "ml": "http://localhost:8005",
-    "rooms": "http://localhost:8006",
-    "notifications": "http://localhost:8007",
-    "events": "http://localhost:8008",
-    "files": "http://localhost:8009",
+    "auth": os.getenv("AUTH_SERVICE_URL", "http://localhost:8001"),
+    "core": os.getenv("CORE_SERVICE_URL", "http://localhost:8002"),
+    "data": os.getenv("DATA_SERVICE_URL", "http://localhost:8003"),
+    "sensors": os.getenv("SENSORS_SERVICE_URL", "http://localhost:8004"),
+    "ml": os.getenv("ML_SERVICE_URL", "http://localhost:8005"),
+    "rooms": os.getenv("ROOMS_SERVICE_URL", "http://localhost:8006"),
+    "notifications": os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8007"),
+    "events": os.getenv("EVENTS_SERVICE_URL", "http://localhost:8008"),
+    "files": os.getenv("FILES_SERVICE_URL", "http://localhost:8009"),
 }
 
 # Список путей, которые НЕ ТРЕБУЮТ проверки токена
@@ -49,6 +51,16 @@ PUBLIC_ROUTES = [
 ]
 
 async_client = httpx.AsyncClient()
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    """
+    Добавляет Request-ID для сквозной трассировки запросов.
+    """
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 async def check_auth(request: Request):
     """
@@ -68,9 +80,12 @@ async def check_auth(request: Request):
 
     # 3. Делегируем проверку в auth-service (Порт: 8001)
     try:
+        # Прокидываем Request-ID для логов
+        headers = {"Authorization": auth_header, "X-Request-ID": request.headers.get("X-Request-ID", "")}
+        
         verify_res = await async_client.get(
             f"{SERVICES['auth']}/auth/verify", 
-            headers={"Authorization": auth_header},
+            headers=headers,
             timeout=2.0
         )
         if verify_res.status_code != 200:
@@ -94,6 +109,8 @@ async def gateway_proxy(service: str, rest_of_path: str, request: Request, _ = D
     
     headers = dict(request.headers)
     headers.pop("host", None)
+    headers.pop("content-length", None) # httpx сам пересчитает длину
+    headers["X-Request-ID"] = request.headers.get("X-Request-ID", "")
 
     try:
         req = async_client.build_request(

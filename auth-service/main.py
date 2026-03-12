@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2 import pool
 from fastapi import FastAPI, HTTPException, Header, APIRouter
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,20 +22,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Работа с БД ---
-def get_db_conn():
+# --- Работа с БД (Connection Pool) ---
+db_pool = None
+
+@app.on_event("startup")
+def startup_db_pool():
+    global db_pool
     try:
-        conn = psycopg2.connect(
+        db_pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=20,
             dbname=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
             host=os.getenv("DB_HOST", "localhost"),
             port=os.getenv("DB_PORT")
         )
-        return conn
+        print("✅ Пул соединений с БД успешно создан")
     except Exception as e:
-        print(f"❌ Ошибка подключения к БД: {e}")
-        raise HTTPException(status_code=500, detail="Database connection error")
+        print(f"❌ Ошибка создания пула БД: {e}")
+
+@app.on_event("shutdown")
+def close_db_pool():
+    if db_pool:
+        db_pool.closeall()
+        print("🛑 Пул соединений с БД закрыт")
+
+def get_db_conn():
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="DB Pool not initialized")
+    return db_pool.getconn()
 
 # --- Схемы данных ---
 class UserRegister(BaseModel):
@@ -76,7 +93,8 @@ def register(user: UserRegister):
         raise HTTPException(status_code=400, detail="Пользователь уже существует")
     finally:
         cur.close()
-        conn.close()
+        # Возвращаем соединение в пул, а не закрываем его
+        db_pool.putconn(conn)
 
 @auth_router.post("/login", response_model=Token) # Переименовали для шлюза
 def login(user: UserLogin):
@@ -90,7 +108,7 @@ def login(user: UserLogin):
     """, (user.username,))
     res = cur.fetchone()
     cur.close()
-    conn.close()
+    db_pool.putconn(conn)
 
     if not res or not verify_password(user.password, res[1]): # Используем утилиту
         raise HTTPException(status_code=401, detail="Неверные учетные данные")
