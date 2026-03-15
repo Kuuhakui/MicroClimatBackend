@@ -12,12 +12,41 @@ logger = logging.getLogger(__name__)
 # Загрузка переменных окружения
 load_dotenv()
 
-app = FastAPI(title="Core Service", description="Центральная бизнес-логика и системные настройки.")
-core_router = APIRouter(prefix="/core", tags=["Core"])
+import psycopg2
+from psycopg2 import pool
+from contextlib import asynccontextmanager
 
-@core_router.on_event("startup")
-async def startup_event():
-    logger.info("Core Service запущен.")
+db_pool = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global db_pool
+    try:
+        db_pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dbname=os.getenv("DB_NAME", "my_database"),
+            user=os.getenv("DB_USER", "user"),
+            password=os.getenv("DB_PASSWORD", "password"),
+            host=os.getenv("DB_HOST", "localhost"),
+            port=os.getenv("DB_PORT", "5432")
+        )
+        logger.info("DB Pool initialized")
+    except Exception as e:
+        logger.error(f"Failed to init DB pool: {e}")
+    yield
+    if db_pool:
+        db_pool.closeall()
+        logger.info("DB Pool closed")
+
+def get_db_conn():
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="DB Connection Pool not initialized")
+    return db_pool.getconn()
+
+app = FastAPI(title="Core Service", description="Центральная бизнес-логика и системные настройки.", lifespan=lifespan)
+core_router = APIRouter(prefix="/core", tags=["Core"])
+# logger.info("Core Service запущен.")
 
 @core_router.get("/")
 async def root():
@@ -123,11 +152,37 @@ class FeatureFlag(BaseModel):
 
 @core_router.get("/features")
 async def get_all_features():
-    return feature_flags
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT name, is_enabled FROM feature_flags")
+        flags = cur.fetchall()
+        return {row[0]: row[1] for row in flags}
+    except Exception as e:
+        logger.error(f"Error fetching features: {e}")
+        return {}
+    finally:
+        cur.close()
+        db_pool.putconn(conn)
 
 @core_router.post("/features")
 async def set_feature_flag(flag: FeatureFlag):
-    feature_flags[flag.flag_name] = flag.enabled
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO feature_flags (name, is_enabled) VALUES (%s, %s) ON CONFLICT (name) DO UPDATE SET is_enabled = EXCLUDED.is_enabled",
+            (flag.flag_name, flag.enabled)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error setting feature flag: {e}")
+        raise HTTPException(status_code=500, detail="Error setting feature flag")
+    finally:
+        cur.close()
+        db_pool.putconn(conn)
+    
     logger.info(f"Feature flag обновлен: {flag.flag_name} = {flag.enabled}")
     return {"message": "Feature flag обновлен"}
 

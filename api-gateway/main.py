@@ -30,15 +30,15 @@ app.add_middleware(
 
 # Конфигурация портов из твоего плана
 SERVICES = {
-    "auth": os.getenv("AUTH_SERVICE_URL", "http://localhost:8001"),
-    "core": os.getenv("CORE_SERVICE_URL", "http://localhost:8002"),
-    "data": os.getenv("DATA_SERVICE_URL", "http://localhost:8003"),
-    "sensors": os.getenv("SENSORS_SERVICE_URL", "http://localhost:8004"),
-    "ml": os.getenv("ML_SERVICE_URL", "http://localhost:8005"),
-    "rooms": os.getenv("ROOMS_SERVICE_URL", "http://localhost:8006"),
-    "notifications": os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8007"),
-    "events": os.getenv("EVENTS_SERVICE_URL", "http://localhost:8008"),
-    "files": os.getenv("FILES_SERVICE_URL", "http://localhost:8009"),
+    "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001"),
+    "core": os.getenv("CORE_SERVICE_URL", "http://core-service:8002"),
+    "data": os.getenv("DATA_SERVICE_URL", "http://data-storage-service:8003"),
+    "sensors": os.getenv("SENSORS_SERVICE_URL", "http://sensor-ingestion-service:8004"),
+    "ml": os.getenv("ML_SERVICE_URL", "http://ml-prediction-service:8005"),
+    "rooms": os.getenv("ROOMS_SERVICE_URL", "http://room-management-service:8006"),
+    "notifications": os.getenv("NOTIFICATIONS_SERVICE_URL", "http://notification-service:8007"),
+    "events": os.getenv("EVENTS_SERVICE_URL", "http://event-log-service:8008"),
+    "files": os.getenv("FILES_SERVICE_URL", "http://minio-file-service:8009"),
 }
 
 # Список путей, которые НЕ ТРЕБУЮТ проверки токена

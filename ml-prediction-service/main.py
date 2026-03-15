@@ -12,7 +12,7 @@ from datetime import datetime
 
 # Конфигурация
 MODEL_PATH = os.getenv("MODEL_PATH", "models/xgboost_final_5y.pkl")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis-broker:6379")
 
 app = FastAPI(title="ML Prediction Service", description="Сервис прогнозирования температуры")
 

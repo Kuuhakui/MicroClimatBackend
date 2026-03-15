@@ -1,7 +1,7 @@
 import os
 import httpx
 from fastapi import FastAPI, HTTPException
-from . import schemas
+import schemas
 
 app = FastAPI()
 

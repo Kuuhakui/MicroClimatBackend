@@ -1,0 +1,22 @@
+{
+  "buildings": [],
+  "event_types": [],
+  "feature_flags": [],
+  "ml_models": [],
+  "roles": [],
+  "sensor_types": [],
+  "system_settings": [],
+  "rooms": [],
+  "users": [],
+  "ml_model_configs": [],
+  "room_physical_params": [],
+  "sensors": [],
+  "system_logs": [],
+  "temperature_predictions": [],
+  "threshold_configs": [],
+  "user_preferences": [],
+  "sensor_calibrations": [],
+  "sensor_measurements": [],
+  "system_events": [],
+  "incident_tickets": []
+}

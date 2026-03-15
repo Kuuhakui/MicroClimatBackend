@@ -4,16 +4,19 @@ import pika
 import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import redis.asyncio as aioredis
+from typing import Optional
 
 app = FastAPI()
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis-broker:6379")
 DATA_STORAGE_URL = os.getenv("DATA_STORAGE_URL", "http://data-storage-service:8003")
 
 class SensorData(BaseModel):
     sensor_id: str
-    temperature: float
-    humidity: float
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
 
 @app.post("/sensors")
 async def ingest_sensor_data(data: SensorData):
@@ -28,15 +31,19 @@ async def ingest_sensor_data(data: SensorData):
                               routing_key='sensor_data',
                               body=data.json())
         connection.close()
-    except pika.exceptions.AMQPConnectionError:
-        raise HTTPException(status_code=500, detail="Could not connect to RabbitMQ")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"RabbitMQ error: {str(e)}")
 
-    # 3. Save data via data-storage-service
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(f"{DATA_STORAGE_URL}/data", json=data.dict())
-            response.raise_for_status()
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=503, detail=f"Error communicating with data-storage-service: {exc}")
+    # 3. Publish to Redis Pub/Sub (for Prediction & Notifications)
+    try:
+        r = aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+        await r.publish("sensor_data", data.json())
+        await r.aclose()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
 
     return {"status": "ok"}

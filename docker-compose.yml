@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: my_database
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    ports:
+      - "5672:5672"   # Порт для обмена сообщениями
+      - "15672:15672" # Порт для веб-панели управления
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  redis-broker:
+    image: redis:7
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api-gateway:
+    build: ./api-gateway
+    restart: always
+    ports:
+      - "8000:8000"
+
+  auth-service:
+    build: ./auth-service
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=my_database
+      - SECRET_KEY=super-secret-key-123
+    depends_on:
+      - postgres
+
+  core-service:
+    build: ./core-service
+    restart: always
+    ports:
+      - "8002:8002"
+    environment:
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=my_database
+    depends_on:
+      - postgres
+
+  data-storage-service:
+    build: ./data-storage-service
+    restart: always
+    ports:
+      - "8003:8003"
+    environment:
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=my_database
+      - RABBITMQ_HOST=rabbitmq
+      - BACKUP_FILE_PATH=backups/database_backup.json
+      - BACKUP_INTERVAL=600  # Выгрузка каждые 10 минут
+    depends_on:
+      - postgres
+      - rabbitmq
+    volumes:
+      - ./data-storage-service/backups:/app/backups
+
+  sensor-ingestion-service:
+    build: ./sensor-ingestion-service
+    restart: always
+    ports:
+      - "8004:8004"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - REDIS_URL=redis://redis-broker:6379
+      - DATA_STORAGE_URL=http://data-storage-service:8003
+    depends_on:
+      - rabbitmq
+      - redis-broker
+      - data-storage-service
+
+  ml-prediction-service:
+    build: ./ml-prediction-service
+    restart: always
+    ports:
+      - "8005:8005"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - REDIS_URL=redis://redis-broker:6379
+      - DATA_STORAGE_URL=http://data-storage-service:8003
+    depends_on:
+      - rabbitmq
+      - redis-broker
+      - data-storage-service
+
+  room-management-service:
+    build: ./room-management-service
+    restart: always
+    ports:
+      - "8006:8006"
+
+  notification-service:
+    build: ./notification-service
+    restart: always
+    ports:
+      - "8007:8007"
+    environment:
+      - REDIS_HOST=redis-broker
+      - REDIS_PORT=6379
+      - CORE_SERVICE_URL=http://core-service:8002
+      - EVENT_LOG_SERVICE_URL=http://event-log-service:8008
+    depends_on:
+      - redis-broker
+      - core-service
+      - event-log-service
+
+  event-log-service:
+    build: ./event-log-service
+    restart: always
+    ports:
+      - "8008:8008"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/my_database
+    depends_on:
+      - postgres
+
+  minio-file-service:
+    build: ./minio-file-service
+    restart: always
+    ports:
+      - "8009:8009"
+
+  sensor-simulator:
+    build: ./sensor-simulator
+    restart: always
+    environment:
+      - INGESTION_URL=http://sensor-ingestion-service:8004/sensors
+      - DATA_STORAGE_URL=http://data-storage-service:8003/sensors
+    depends_on:
+      - sensor-ingestion-service
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:
