@@ -80,13 +80,48 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.include_router(SensorRoutes().router)
-app.include_router(BuildingRoutes().router)
-app.include_router(RoomRoutes().router)
+app.include_router(SensorRoutes(prefix="/data/sensors").router)
+app.include_router(BuildingRoutes(prefix="/data/buildings").router)
+app.include_router(RoomRoutes(prefix="/data/rooms").router)
 
 @app.post("/data", response_model=schemas.SensorMeasurement)
 def create_data(measurement: schemas.SensorMeasurementCreate, db: Session = Depends(get_db)):
     return crud.create_sensor_measurement(db=db, measurement=measurement)
+
+@app.get("/data/measurements/")
+def get_measurements(
+    skip: int = 0,
+    limit: int = 500,
+    from_time: str = None,
+    to_time: str = None,
+    db: Session = Depends(get_db)
+):
+    """Измерения датчиков с опциональной фильтрацией по времени"""
+    from .models import SensorMeasurement
+    from datetime import datetime, timezone
+    query = db.query(SensorMeasurement)
+    if from_time:
+        try:
+            dt = datetime.fromisoformat(from_time.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.filter(SensorMeasurement.measured_at >= dt)
+        except Exception:
+            pass
+    if to_time:
+        try:
+            dt = datetime.fromisoformat(to_time.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.filter(SensorMeasurement.measured_at <= dt)
+        except Exception:
+            pass
+    measurements = query.order_by(SensorMeasurement.measured_at.asc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": m.id,
+            "sensor_id": str(m.sensor_id),
+            "value": m.value,
+            "measured_at": m.measured_at.isoformat() if m.measured_at else None
+        }
+        for m in measurements
+    ]
 
 @app.get("/")
 async def root():
